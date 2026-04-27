@@ -184,14 +184,9 @@ class Tokenizer:
         with open(vocab_filepath) as f:
             vocab_data = json.load(f)
         vocab = {int(k): bytes(v) for k, v in vocab_data.items()}
-        merges = []
+        merges = None
         with open(merges_filepath) as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    parts = line.split('\t')
-                    if len(parts) == 2:
-                        merges.append((parts[0].encode('utf-8'), parts[1].encode('utf-8')))
+            merges = [(bytes(a), bytes(b)) for a, b in json.load(f)]
         return cls(vocab, merges, special_tokens)
 
     def _bpe_encode(self, token_bytes: bytes) -> list[int]:

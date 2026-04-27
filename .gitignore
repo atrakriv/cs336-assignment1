@@ -1,6 +1,6 @@
 #### atak ####
-merges.txt
-vocab.json
+merges*
+vocab*
 
 # Python
 __pycache__/

@@ -1,7 +1,7 @@
 from hw1 import *
 
 if __name__ == "__main__":
-    # cProfile.run("main()", sort="cumtime")
+    
     input_path = "data/TinyStoriesV2-GPT4-train.txt"
     vocab_size = 10
     special_tokens = ['<|endoftext|>']
@@ -15,7 +15,6 @@ if __name__ == "__main__":
 
     with open("vocab.json", "w") as f:
         json.dump({str(k): list(v) for k, v in vocab.items()}, f)
-
+    
     with open("merges.txt", "w") as f:
-        for a, b in merges:
-            f.write(a.decode("utf-8") + "\t" + b.decode("utf-8") + "\n")
+        json.dump([(list(a), list(b)) for a, b in merges], f)
