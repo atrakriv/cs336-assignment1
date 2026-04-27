@@ -24,16 +24,16 @@ if __name__ == "__main__":
 
     # ── Hyperparameters ──────────────────────────────────────────────────────
     device       = "cuda" if torch.cuda.is_available() else "cpu"
-    context_length = 256
+    context_len  = 256
     batch_size   = 32
-    num_iters    = 10    # 5000
+    num_iters    = 10  # 5000
     log_interval = 1   # 100
     d_model      = 512
     num_heads    = 16
     d_ff         = 1344  # d_model * 4
     num_layers   = 4
     theta        = 10_000.0
-    max_lr           = 3e-4
+    max_lr       = 3e-4
     min_lr       = 3e-5
     betas = (0.9, 0.95)
     warmup_iters = max(1, num_iters // 10)
@@ -67,7 +67,7 @@ if __name__ == "__main__":
         num_heads=num_heads,
         d_ff=d_ff,
         theta=theta,
-        context_length=context_length,
+        context_length=context_len,
         vocab_size=actual_vocab_size,
         num_layers=num_layers,
     ).to(device)
@@ -84,14 +84,13 @@ if __name__ == "__main__":
     model.train()
     for step in range(1, num_iters + 1):
         lr = get_cosine_lr(step, max_lr, min_lr, warmup_iters, cosine_cycle_iters)
-        for pg in optimizer.param_groups:
-            pg['lr'] = lr
-        x, y = data_loader(dataset, batch_size, context_length, device)
-        logits = model(x)                          # (B, T, vocab_size)
+        for pg in optimizer.param_groups: pg['lr'] = lr
+        x, y = data_loader(dataset, batch_size, context_len, device)
+        logits = model(x)  # (B, T, V)
         loss = cross_entropy(logits, y)
         optimizer.zero_grad()
         loss.backward()
-        clip_gradient(model.parameters(), max_norm=1.0)
+        clip_gradient(model.parameters(), max_norm = 1.0)
         optimizer.step()
         if step % log_interval == 0:
             print(f"step {step:>6} | loss {loss.item():.4f} | lr {lr:.2e}")

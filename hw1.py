@@ -378,8 +378,9 @@ class TransformerLM(nn.Module): # are context_length and max_seq_len the same th
     
 def cross_entropy(inputs, targets):
     logits = inputs - inputs.max(dim=-1, keepdim=True).values
-    log_probs = logits - torch.log(torch.sum(torch.exp(logits), dim=-1, keepdim=True)) # you can use torch.logsumexp
-    return -log_probs.gather(-1, targets.unsqueeze(-1)).squeeze(-1).mean()
+    # also can use torch.logsumexp
+    log_probs = logits - torch.log(torch.sum(torch.exp(logits), dim=-1, keepdim=True)) # B*T*V
+    return -log_probs.gather(-1, targets.unsqueeze(-1)).squeeze(-1).mean()   # squeeze(-1) can be removed
  
 class AdamW(torch.optim.Optimizer):
     def __init__(self, params, lr, betas, weight_decay, eps):
@@ -450,7 +451,7 @@ def get_cosine_lr(
     decay_ratio = (n - tw) / (tc - tw)
     assert 0 <= decay_ratio <= 1
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
-    return min_lr+ coeff * (max_lr - min_lr)
+    return min_lr + coeff * (max_lr - min_lr)
 
 def clip_gradient(params, max_norm):
     gs = [p.grad for p in params if p.grad is not None]
