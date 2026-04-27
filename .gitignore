@@ -1,3 +1,39 @@
+#### atak ####
+merges.txt
+vocab.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model checkpoints
+*.pt
+*.pth
+*.ckpt
+
+# HuggingFace / transformers
+*.bin
+
+# Datasets
+data/
+datasets/
+
+# logs
+logs/
+wandb/
+
+# experiment outputs
+outputs/
+results/
+
+# misc
+.DS_Store
+#### atak ####
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
