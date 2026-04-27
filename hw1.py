@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import cProfile
-import pstats
-
 from collections.abc import Callable
 from typing import Optional
 
@@ -415,31 +412,52 @@ class AdamW(torch.optim.Optimizer):
                 state["t"] = t
         return loss
     # optimized version: in-place m & v update [no need to state["m/v"] = m/v]
-    def step_(self, closure: Optional[Callable] = None):
-        loss = None if closure is None else closure()
-        for group in self.param_groups:
-            lr = group["lr"]
-            beta1, beta2 = group["betas"]
-            weight_decay = group["weight_decay"]
-            eps = group["eps"]
-            for p in group["params"]:
-                if p.grad is None: continue
-                grad = p.grad.data
-                state = self.state[p]
-                if len(state) == 0:
-                    state["t"] = 0
-                    state["m"] = torch.zeros_like(p.data)
-                    state["v"] = torch.zeros_like(p.data)
-                m = state["m"]
-                v = state["v"]
-                state["t"] += 1
-                t = state["t"]
-                m.mul_(beta1).add_(grad, alpha=1 - beta1)
-                v.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-                step_size = lr * math.sqrt(1 - beta2 ** t) / (1 - beta1 ** t)
-                p.data.addcdiv_(m, v.sqrt().add_(eps), value=-step_size)
-                p.data.add_(p.data, alpha=-lr * weight_decay)
-        return loss
+    # def step_(self, closure: Optional[Callable] = None):
+    #     loss = None if closure is None else closure()
+    #     for group in self.param_groups:
+    #         lr = group["lr"]
+    #         beta1, beta2 = group["betas"]
+    #         weight_decay = group["weight_decay"]
+    #         eps = group["eps"]
+    #         for p in group["params"]:
+    #             if p.grad is None: continue
+    #             grad = p.grad.data
+    #             state = self.state[p]
+    #             if len(state) == 0:
+    #                 state["t"] = 0
+    #                 state["m"] = torch.zeros_like(p.data)
+    #                 state["v"] = torch.zeros_like(p.data)
+    #             m = state["m"]
+    #             v = state["v"]
+    #             state["t"] += 1
+    #             t = state["t"]
+    #             m.mul_(beta1).add_(grad, alpha=1 - beta1)
+    #             v.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+    #             step_size = lr * math.sqrt(1 - beta2 ** t) / (1 - beta1 ** t)
+    #             p.data.addcdiv_(m, v.sqrt().add_(eps), value=-step_size)
+    #             p.data.add_(p.data, alpha=-lr * weight_decay)
+    #     return loss
+
+def get_cosine_lr(
+    n: int,
+    max_lr: float,
+    min_lr: float,
+    tw: int,
+    tc: int,
+):
+    if n < tw: return max_lr * n / tw
+    if n > tc: return min_lr
+    decay_ratio = (n - tw) / (tc - tw)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    return min_lr+ coeff * (max_lr - min_lr)
+
+def clip_gradient(params, max_norm):
+    gs = [p.grad for p in params if p.grad is not None]
+    norm = torch.sqrt(sum((g**2).sum() for g in gs))
+    clip_coef = min(1.0, max_norm / (norm + 1e-6))
+    for g in gs:
+        g.mul_(clip_coef)
     
 # def data_loader_(dataset, batch_size: int, context_length: int, device: str):
 #     smpls = np.random.randint(0, len(dataset) - context_length, size = batch_size)
