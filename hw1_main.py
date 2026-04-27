@@ -47,10 +47,18 @@ if __name__ == "__main__":
         special_tokens=special_tokens,
     )
     input_path = "data/TinyStoriesV2-GPT4-valid.txt"
-    with open(input_path) as f:
-        text = f.read()
-    token_ids = tokenizer.encode(text)
-    dataset = np.array(token_ids, dtype=np.int32)
+    dataset_bin = "data/TinyStoriesV2-GPT4-valid.bin"
+    if not os.path.exists(dataset_bin):
+        with open(input_path) as f:
+            text = f.read()
+        token_ids = tokenizer.encode(text)
+        arr = np.array(token_ids, dtype=np.int32)
+        arr.tofile(dataset_bin)
+        n_tokens = len(arr)
+        del arr, token_ids, text
+    else:
+        n_tokens = os.path.getsize(dataset_bin) // np.dtype(np.int32).itemsize
+    dataset = np.memmap(dataset_bin, dtype=np.int32, mode="r", shape=(n_tokens,))
 
     # ── Model + optimizer ────────────────────────────────────────────────────
     actual_vocab_size = max(tokenizer.vocab.keys()) + 1
