@@ -368,11 +368,17 @@ class TransformerLM(nn.Module): # are context_length and max_seq_len the same th
         x = self.lm_head (x)
         return x
     
-def cross_entropy(inputs, targets):
+# use for hw only
+def cross_entropy_(inputs, targets):
     logits = inputs - inputs.max(dim=-1, keepdim=True).values
     # also can use torch.logsumexp
     log_probs = logits - torch.log(torch.sum(torch.exp(logits), dim=-1, keepdim=True)) # B*T*V
     return -log_probs.gather(-1, targets.unsqueeze(-1)).squeeze(-1).mean()   # squeeze(-1) can be removed
+
+def cross_entropy(logits, targets):
+    x = torch.log_softmax(logits, dim=-1)
+    logps = x.gather(index=targets.unsqueeze(dim=-1), dim=-1)
+    return -logps.mean()
  
 class AdamW(torch.optim.Optimizer):
     def __init__(self, params, lr, betas, weight_decay, eps):
