@@ -311,7 +311,6 @@ class MultiHeadSelfAttention(nn.Module):
         self.d_model = d_model
         self.num_heads = num_heads
         self.d_head = d_model // num_heads
-        std = math.sqrt(1 / d_model)
         self.q_proj = Linear(d_model, d_model, **factory_kwargs)
         self.k_proj = Linear(d_model, d_model, **factory_kwargs)
         self.v_proj = Linear(d_model, d_model, **factory_kwargs)
@@ -337,21 +336,14 @@ class MultiHeadSelfAttention(nn.Module):
         return x.transpose(1, 2).contiguous().view(bsz, seq_len, self.d_model)
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, max_seq_len, theta, eps: float = 1e-5, device=None):
+    def __init__(self, d_model, num_heads, d_ff, max_seq_len, theta, eps: float = 1e-5, device=None, dtype=None):
         super().__init__()
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.d_ff = d_ff
-        self.max_seq_len = max_seq_len
-        self.theta = theta
-        self.eps = eps
-        self.device = device
-        self.d_head = d_model // num_heads
-        rope = RotaryPositionalEmbedding(self.theta, self.d_head, self.max_seq_len, self.device)
-        self.attn = MultiHeadSelfAttention(self.d_model, self.num_heads, rope, self.device)
-        self.ln1 = RMSNorm(d_model, eps, device)
-        self.ln2 = RMSNorm(d_model, eps, device)
-        self.ffn = SwiGLU(d_model, d_ff, device)
+        d_head = d_model // num_heads
+        self.ln1 = RMSNorm(d_model, eps, device, dtype)
+        self.ln2 = RMSNorm(d_model, eps, device, dtype) 
+        self.rope = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
+        self.attn = MultiHeadSelfAttention(d_model, num_heads, self.rope, device, dtype)
+        self.ffn = SwiGLU(d_model, d_ff, device, dtype)
     def forward(self, x):
         token_positions = torch.arange(x.shape[1])
         y = x + self.attn(self.ln1(x), token_positions)
