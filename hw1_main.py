@@ -1,11 +1,20 @@
 import cProfile
 import pstats
 
+import argparse
+import random
+
+import numpy as np
+import torch
+import wandb
+from omegaconf import OmegaConf
+
+from configs.defaults import Config
 from hw1 import *
 
 if __name__ == "__main__":
 
-    # input_path = "data/TinyStoriesV2-GPT4-train.txt"
+    # input_path = "data/tiny-stories/TinyStoriesV2-GPT4-train.txt"
     # vocab_size = 10
     # special_tokens = ['<|endoftext|>']
     
@@ -22,22 +31,44 @@ if __name__ == "__main__":
     # with open("merges.txt", "w") as f:
     #     json.dump([(list(a), list(b)) for a, b in merges], f)
 
+    
+    # ── Load the config ──────────────────────────────────────────────────────
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default=None, help="Path to a yaml config file (overrides defaults)")
+    args = parser.parse_args()
+
+    default_config = OmegaConf.structured(Config)
+
+    if args.config is not None:
+        cfg = OmegaConf.merge(default_config, OmegaConf.load(args.config))
+    else:
+        cfg = default_config
+
+    # ── Reproducibility ──────────────────────────────────────────────────────
+    seed = cfg.training.seed
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
     # ── Hyperparameters ──────────────────────────────────────────────────────
-    device       = "cuda" if torch.cuda.is_available() else "cpu"
-    context_len  = 256
-    batch_size   = 32
-    num_iters    = 10  # 5000
-    log_interval = 1   # 100
-    d_model      = 512
-    num_heads    = 16
-    d_ff         = 1344  # d_model * 4
-    num_layers   = 4
-    theta        = 10_000.0
-    max_lr       = 3e-4
-    min_lr       = 3e-5
-    betas = (0.9, 0.95)
-    warmup_iters = max(1, num_iters // 10)
-    cosine_cycle_iters = num_iters
+    device  = cfg.training.device
+    context_len  = cfg.training.context_len
+    batch_size = cfg.training.batch_size
+    num_iters = cfg.training.num_iters
+    log_interval = cfg.training.log_interval
+    d_model = cfg.training.d_model
+    num_heads = cfg.training.num_heads
+    d_ff = cfg.training.d_ff
+    num_layers = cfg.training.num_layers
+    theta = cfg.training.theta
+    max_lr = cfg.training.max_lr
+    min_lr = cfg.training.min_lr
+    betas = (cfg.training.adam_beta1, cfg.training.adam_beta2)
+    warmup_iters = cfg.training.warmup_iters
+    cosine_cycle_iters = cfg.training.cosine_cycle_iters
+    checkpoint_interval = cfg.training.checkpoint_interval
 
     # ── Data ──────────────────────────────────────────────────────────────────
     special_tokens = ["<|endoftext|>"]
@@ -46,8 +77,8 @@ if __name__ == "__main__":
         merges_filepath="merges.txt",
         special_tokens=special_tokens,
     )
-    input_path = "data/TinyStoriesV2-GPT4-valid.txt"
-    dataset_bin = "data/TinyStoriesV2-GPT4-valid.bin"
+    input_path = cfg.paths.input_text_file
+    dataset_bin = cfg.paths.train_data_file
     if not os.path.exists(dataset_bin):
         with open(input_path) as f:
             text = f.read()
@@ -59,6 +90,13 @@ if __name__ == "__main__":
     else:
         n_tokens = os.path.getsize(dataset_bin) // np.dtype(np.int32).itemsize
     dataset = np.memmap(dataset_bin, dtype=np.int32, mode="r", shape=(n_tokens,))
+
+    # ── Logging ──────────────────────────────────────────────────────────────
+    wandb.init(
+        project=cfg.training.wandb_project,
+        name=cfg.training.wandb_run_name,
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
 
     # ── Model + optimizer ────────────────────────────────────────────────────
     actual_vocab_size = max(tokenizer.vocab.keys()) + 1
@@ -76,13 +114,24 @@ if __name__ == "__main__":
         model.parameters(),
         lr=max_lr,
         betas=betas,
-        weight_decay=0.1,
-        eps=1e-8,
+        weight_decay=cfg.training.weight_decay,
+        eps=cfg.training.adam_eps,
     )
+
+    # ── Checkpointing ────────────────────────────────────────────────────────
+    checkpoint_dir = cfg.paths.output_dir
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    latest_checkpoint_path = os.path.join(checkpoint_dir, "checkpoint_latest.pt")
+
+    start_step = 1
+    if os.path.exists(latest_checkpoint_path):
+        last_step = load_checkpoint(latest_checkpoint_path, model, optimizer)
+        start_step = last_step + 1
+        print(f"Resumed from checkpoint at step {last_step}")
 
     # ── Training loop ────────────────────────────────────────────────────────
     model.train()
-    for step in range(1, num_iters + 1):
+    for step in range(start_step, num_iters + 1):
         lr = get_cosine_lr(step, max_lr, min_lr, warmup_iters, cosine_cycle_iters)
         for pg in optimizer.param_groups: pg['lr'] = lr
         x, y = data_loader(dataset, batch_size, context_len, device)
@@ -94,3 +143,9 @@ if __name__ == "__main__":
         optimizer.step()
         if step % log_interval == 0:
             print(f"step {step:>6} | loss {loss.item():.4f} | lr {lr:.2e}")
+            wandb.log({"train/loss": loss.item(), "train/lr": lr}, step=step)
+        if checkpoint_interval > 0 and step % checkpoint_interval == 0:
+            save_checkpoint(model, optimizer, step, latest_checkpoint_path)
+
+    save_checkpoint(model, optimizer, num_iters, latest_checkpoint_path)
+    wandb.finish()
