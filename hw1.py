@@ -458,14 +458,6 @@ def clip_gradient(params, max_norm):
     for g in gs:
         g.mul_(clip_coef)
     
-# def data_loader_(dataset, batch_size: int, context_length: int, device: str):
-#     smpls = np.random.randint(0, len(dataset) - context_length, size = batch_size)
-#     x = torch.empty((batch_size, context_length), dtype=torch.long, device=device)
-#     y = torch.empty((batch_size, context_length), dtype=torch.long, device=device)
-#     for cnt,e in enumerate(smpls):
-#         x[cnt,:] = torch.tensor((dataset[e : e+context_length]))
-#         y[cnt, :] = torch.tensor((dataset[e+1 : e+1+context_length]))
-#     return x, y
 
 def data_loader(dataset, batch_size: int, context_length: int, device: str):
     smpls = np.random.randint(0, len(dataset) - context_length, size=batch_size)
