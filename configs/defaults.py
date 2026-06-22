@@ -4,9 +4,10 @@ from typing import List
 
 @dataclass
 class PathConfig:
-    input_text_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.txt"
-    train_data_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.bin"
-    val_data_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.bin"
+    train_text_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-train.txt"
+    val_text_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.txt"
+    train_bin_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-train.bin"
+    val_bin_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.bin"
     output_dir: str = "outputs/prt"
 
 @dataclass
@@ -28,8 +29,8 @@ class TrainingConfig:
 
     # training loop
     batch_size: int = 64
-    num_iters: int = 10     # 5000
-    log_interval: int = 1   # 100
+    num_iters: int = 5000
+    log_interval: int = 100
     warmup_iters: int = 1
     cosine_cycle_iters: int = 10
 

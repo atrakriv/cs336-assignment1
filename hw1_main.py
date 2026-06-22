@@ -69,6 +69,8 @@ if __name__ == "__main__":
     warmup_iters = cfg.training.warmup_iters
     cosine_cycle_iters = cfg.training.cosine_cycle_iters
     checkpoint_interval = cfg.training.checkpoint_interval
+    eval_interval = cfg.training.eval_interval
+    max_val_examples = cfg.training.max_val_examples
 
     # ── Data ──────────────────────────────────────────────────────────────────
     special_tokens = ["<|endoftext|>"]
@@ -77,19 +79,21 @@ if __name__ == "__main__":
         merges_filepath="merges.txt",
         special_tokens=special_tokens,
     )
-    input_path = cfg.paths.input_text_file
-    dataset_bin = cfg.paths.train_data_file
-    if not os.path.exists(dataset_bin):
-        with open(input_path) as f:
-            text = f.read()
-        token_ids = tokenizer.encode(text)
-        arr = np.array(token_ids, dtype=np.int32)
-        arr.tofile(dataset_bin)
-        n_tokens = len(arr)
-        del arr, token_ids, text
-    else:
-        n_tokens = os.path.getsize(dataset_bin) // np.dtype(np.int32).itemsize
-    dataset = np.memmap(dataset_bin, dtype=np.int32, mode="r", shape=(n_tokens,))
+    def tokenize_to_bin(input_path, dataset_bin):
+        if not os.path.exists(dataset_bin):
+            with open(input_path) as f:
+                text = f.read()
+            token_ids = tokenizer.encode(text)
+            arr = np.array(token_ids, dtype=np.int32)
+            arr.tofile(dataset_bin)
+            n_tokens = len(arr)
+            del arr, token_ids, text
+        else:
+            n_tokens = os.path.getsize(dataset_bin) // np.dtype(np.int32).itemsize
+        return np.memmap(dataset_bin, dtype=np.int32, mode="r", shape=(n_tokens,))
+
+    train_dataset = tokenize_to_bin(cfg.paths.train_text_file, cfg.paths.train_bin_file)
+    val_dataset = tokenize_to_bin(cfg.paths.val_text_file, cfg.paths.val_bin_file)
 
     # ── Logging ──────────────────────────────────────────────────────────────
     wandb.init(
@@ -134,7 +138,7 @@ if __name__ == "__main__":
     for step in range(start_step, num_iters + 1):
         lr = get_cosine_lr(step, max_lr, min_lr, warmup_iters, cosine_cycle_iters)
         for pg in optimizer.param_groups: pg['lr'] = lr
-        x, y = data_loader(dataset, batch_size, context_len, device)
+        x, y = data_loader(train_dataset, batch_size, context_len, device)
         logits = model(x)  # (B, T, V)
         loss = cross_entropy(logits, y)
         optimizer.zero_grad()
@@ -146,6 +150,19 @@ if __name__ == "__main__":
             wandb.log({"train/loss": loss.item(), "train/lr": lr}, step=step)
         if checkpoint_interval > 0 and step % checkpoint_interval == 0:
             save_checkpoint(model, optimizer, step, latest_checkpoint_path)
+        if eval_interval > 0 and step % eval_interval == 0:
+            model.eval()
+            num_val_batches = max(1, max_val_examples // batch_size)
+            with torch.no_grad():
+                val_losses = []
+                for _ in range(num_val_batches):
+                    x_val, y_val = data_loader(val_dataset, batch_size, context_len, device)
+                    val_logits = model(x_val)
+                    val_losses.append(cross_entropy(val_logits, y_val).item())
+            val_loss = sum(val_losses) / len(val_losses)
+            print(f"step {step:>6} | val_loss {val_loss:.4f}")
+            wandb.log({"val/loss": val_loss}, step=step)
+            model.train()
 
     save_checkpoint(model, optimizer, num_iters, latest_checkpoint_path)
     wandb.finish()
