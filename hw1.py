@@ -168,6 +168,8 @@ class Tokenizer:
         self.special_token_set: set[str] = set(self.special_tokens)
         # Build merge rank lookup: (bytes, bytes) -> rank (lower = applied first)
         self.merge_ranks: dict[tuple[bytes, bytes], int] = {pair: i for i, pair in enumerate(merges)}
+        # Cache of pretoken bytes -> encoded ids, since the same word recurs constantly in natural text
+        self._bpe_cache: dict[bytes, list[int]] = {}
         # Ensure special tokens are in vocab
         for st in self.special_tokens:
             st_bytes = st.encode('utf-8')
@@ -187,6 +189,10 @@ class Tokenizer:
         return cls(vocab, merges, special_tokens)
 
     def _bpe_encode(self, token_bytes: bytes) -> list[int]:
+        cached = self._bpe_cache.get(token_bytes)
+        if cached is not None:
+            return cached
+
         pieces = [bytes([b]) for b in token_bytes]
         while len(pieces) > 1:
             best_rank = float('inf')
@@ -199,7 +205,10 @@ class Tokenizer:
             if best_idx == -1:
                 break
             pieces = pieces[:best_idx] + [pieces[best_idx] + pieces[best_idx + 1]] + pieces[best_idx + 2:]
-        return [self.inverse_vocab[p] for p in pieces]
+
+        ids = [self.inverse_vocab[p] for p in pieces]
+        self._bpe_cache[token_bytes] = ids
+        return ids
 
     def encode(self, text: str) -> list[int]:
         if not text:
