@@ -12,6 +12,7 @@ from collections.abc import Iterable, Iterator
 from multiprocessing import Pool
 
 import numpy as np
+from tqdm import tqdm
 
 import math
 import torch
@@ -87,7 +88,11 @@ class BPETrainer:
         ]
 
         with Pool(processes=len(chunk_args)) as pool:
-            chunk_counts = pool.map(self._pretokenize_chunk, chunk_args)
+            chunk_counts = list(tqdm(
+                pool.imap(self._pretokenize_chunk, chunk_args),
+                total=len(chunk_args),
+                desc="Pretokenizing chunks",
+            ))
 
         # Merge word counts from all chunks
         word_counts: dict = defaultdict(int)
@@ -110,7 +115,7 @@ class BPETrainer:
         merges: list[tuple[bytes, bytes]] = []
         next_id = 256 + len(self.special_tokens)
 
-        for _ in range(num_merges):
+        for _ in tqdm(range(num_merges), desc="Computing BPE merges"):
             if not pair_counts:
                 break
 
@@ -255,7 +260,11 @@ class Tokenizer:
         ]
 
         with Pool(processes=len(chunk_args)) as pool:
-            chunk_arrays = pool.map(self._encode_chunk, chunk_args)
+            chunk_arrays = list(tqdm(
+                pool.imap(self._encode_chunk, chunk_args),
+                total=len(chunk_args),
+                desc=f"Encoding {os.path.basename(input_path)}",
+            ))
 
         return np.concatenate(chunk_arrays)
 
