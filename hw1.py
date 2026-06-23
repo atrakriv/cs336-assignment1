@@ -225,6 +225,31 @@ class Tokenizer:
         for text in iterable:
             yield from self.encode(text)
 
+    @staticmethod
+    def _encode_chunk(args: tuple) -> np.ndarray:
+        """Worker: read one file chunk and encode it to token ids."""
+        tokenizer, input_path, start, end = args
+        with open(input_path, "rb") as f:
+            f.seek(start)
+            chunk_text = f.read(end - start).decode("utf-8", errors="ignore")
+        return np.array(tokenizer.encode(chunk_text), dtype=np.int32)
+
+    def encode_file_parallel(self, input_path: str, num_processes: int = os.cpu_count() or 1) -> np.ndarray:
+        """Encode a large file in parallel, splitting on special-token boundaries to preserve order."""
+        split_token = self.special_tokens[0].encode('utf-8') if self.special_tokens else b"\n"
+        with open(input_path, "rb") as f:
+            boundaries = BPETrainer._find_chunk_boundaries(f, num_processes, split_token)
+
+        chunk_args = [
+            (self, input_path, start, end)
+            for start, end in zip(boundaries[:-1], boundaries[1:])
+        ]
+
+        with Pool(processes=len(chunk_args)) as pool:
+            chunk_arrays = pool.map(self._encode_chunk, chunk_args)
+
+        return np.concatenate(chunk_arrays)
+
     def decode(self, ids: list[int]) -> str:
         return b''.join(self.vocab[i] for i in ids).decode('utf-8', errors='replace')
 
