@@ -7,6 +7,7 @@ import os
 import re
 import regex
 import json
+from functools import lru_cache
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from multiprocessing import Pool
@@ -163,19 +164,32 @@ class BPETrainer:
         return vocab, merges
 
 class Tokenizer:
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    PAT = (
+        r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| """
+        r"""?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    )
+    PAT_RE = regex.compile(PAT)
 
-    def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens=None):
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        special_tokens=None,
+    ):
         self.vocab = vocab
         self.inverse_vocab: dict[bytes, int] = {v: k for k, v in vocab.items()}
         self.merges = merges
+
         self.special_tokens: list[str] = special_tokens or []
-        self.special_token_set: set[str] = set(self.special_tokens)
-        # Build merge rank lookup: (bytes, bytes) -> rank (lower = applied first)
-        self.merge_ranks: dict[tuple[bytes, bytes], int] = {pair: i for i, pair in enumerate(merges)}
-        # Cache of pretoken bytes -> encoded ids, since the same word recurs constantly in natural text
-        self._bpe_cache: dict[bytes, list[int]] = {}
-        # Ensure special tokens are in vocab
+        self.special_token_set = set(self.special_tokens)
+
+        self.merge_ranks = {
+            pair: i for i, pair in enumerate(merges)
+        }
+
+        self.inf = float("inf")
+
+        # Ensure special tokens exist in vocab
         for st in self.special_tokens:
             st_bytes = st.encode('utf-8')
             if st_bytes not in self.inverse_vocab:
@@ -183,93 +197,173 @@ class Tokenizer:
                 self.vocab[next_id] = st_bytes
                 self.inverse_vocab[st_bytes] = next_id
 
+        # Precompute special token ids
+        self.special_token_ids = {
+            st: self.inverse_vocab[st.encode("utf-8")]
+            for st in self.special_tokens
+        }
+
+        # Precompile special-token split regex
+        self.special_pattern = None
+        if self.special_tokens:
+            sorted_special = sorted(
+                self.special_tokens,
+                key=len,
+                reverse=True,
+            )
+
+            pattern = (
+                "("
+                + "|".join(re.escape(st) for st in sorted_special)
+                + ")"
+            )
+            self.special_pattern = re.compile(pattern)
+
     @classmethod
     def from_files(cls, vocab_filepath, merges_filepath, special_tokens=None):
         with open(vocab_filepath) as f:
             vocab_data = json.load(f)
+
         vocab = {int(k): bytes(v) for k, v in vocab_data.items()}
-        merges = None
+
         with open(merges_filepath) as f:
-            merges = [(bytes(a), bytes(b)) for a, b in json.load(f)]
+            merges = [ (bytes(a), bytes(b)) for a, b in json.load(f)]
+
         return cls(vocab, merges, special_tokens)
 
-    def _bpe_encode(self, token_bytes: bytes) -> list[int]:
-        cached = self._bpe_cache.get(token_bytes)
-        if cached is not None:
-            return cached
-
+    @lru_cache(maxsize=100000)
+    def _bpe_encode(self, token_bytes: bytes) -> tuple[int, ...]:
         pieces = [bytes([b]) for b in token_bytes]
+
         while len(pieces) > 1:
-            best_rank = float('inf')
+            best_rank = self.inf
             best_idx = -1
+
             for i in range(len(pieces) - 1):
-                rank = self.merge_ranks.get((pieces[i], pieces[i + 1]), float('inf'))
+                rank = self.merge_ranks.get(
+                    (pieces[i], pieces[i + 1]),
+                    self.inf,
+                )
+
                 if rank < best_rank:
                     best_rank = rank
                     best_idx = i
+
             if best_idx == -1:
                 break
-            pieces = pieces[:best_idx] + [pieces[best_idx] + pieces[best_idx + 1]] + pieces[best_idx + 2:]
 
-        ids = [self.inverse_vocab[p] for p in pieces]
-        self._bpe_cache[token_bytes] = ids
-        return ids
+            pieces = (
+                pieces[:best_idx]
+                + [pieces[best_idx] + pieces[best_idx + 1]]
+                + pieces[best_idx + 2:]
+            )
+
+        return tuple(
+            self.inverse_vocab[p]
+            for p in pieces
+        )
 
     def encode(self, text: str) -> list[int]:
         if not text:
             return []
-        ids: list[int] = []
-        if self.special_tokens:
-            sorted_special = sorted(self.special_tokens, key=len, reverse=True)
-            special_pattern = '(' + '|'.join(re.escape(st) for st in sorted_special) + ')'
-            parts = re.split(special_pattern, text)
+
+        ids = []
+        append_id = ids.append
+        append_ids = ids.extend
+
+        if self.special_pattern is not None:
+            parts = self.special_pattern.split(text)
         else:
             parts = [text]
+
         for part in parts:
             if not part:
                 continue
+
             if part in self.special_token_set:
-                ids.append(self.inverse_vocab[part.encode('utf-8')])
+                append_id(self.special_token_ids[part])
             else:
-                for token in regex.findall(self.PAT, part):
-                    ids.extend(self._bpe_encode(token.encode('utf-8')))
+                for token in self.PAT_RE.findall(part):
+                    append_ids(
+                        self._bpe_encode(
+                            token.encode("utf-8")
+                        )
+                    )
+
         return ids
 
-    def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
+    def encode_iterable(
+        self,
+        iterable: Iterable[str],
+    ) -> Iterator[int]:
         for text in iterable:
             yield from self.encode(text)
 
     @staticmethod
-    def _encode_chunk(args: tuple) -> np.ndarray:
-        """Worker: read one file chunk and encode it to token ids."""
+    def _encode_chunk(args):
         tokenizer, input_path, start, end = args
+
         with open(input_path, "rb") as f:
             f.seek(start)
-            chunk_text = f.read(end - start).decode("utf-8", errors="ignore")
-        return np.array(tokenizer.encode(chunk_text), dtype=np.int32)
+            chunk_text = f.read(end - start).decode(
+                "utf-8",
+                errors="ignore",
+            )
 
-    def encode_file_parallel(self, input_path: str, num_processes: int = os.cpu_count() or 1) -> np.ndarray:
-        """Encode a large file in parallel, splitting on special-token boundaries to preserve order."""
-        split_token = self.special_tokens[0].encode('utf-8') if self.special_tokens else b"\n"
+        return np.array(
+            tokenizer.encode(chunk_text),
+            dtype=np.int32,
+        )
+
+    def encode_file_parallel(
+        self,
+        input_path: str,
+        num_processes: int = os.cpu_count() or 1,
+    ) -> np.ndarray:
+
+        split_token = (
+            self.special_tokens[0].encode("utf-8")
+            if self.special_tokens
+            else b"\n"
+        )
+
         with open(input_path, "rb") as f:
-            boundaries = BPETrainer._find_chunk_boundaries(f, num_processes, split_token)
+            boundaries = BPETrainer._find_chunk_boundaries(
+                f,
+                num_processes,
+                split_token,
+            )
 
         chunk_args = [
             (self, input_path, start, end)
-            for start, end in zip(boundaries[:-1], boundaries[1:])
+            for start, end in zip(
+                boundaries[:-1],
+                boundaries[1:],
+            )
         ]
 
         with Pool(processes=len(chunk_args)) as pool:
-            chunk_arrays = list(tqdm(
-                pool.imap(self._encode_chunk, chunk_args),
-                total=len(chunk_args),
-                desc=f"Encoding {os.path.basename(input_path)}",
-            ))
+            chunk_arrays = list(
+                tqdm(
+                    pool.imap(
+                        self._encode_chunk,
+                        chunk_args,
+                    ),
+                    total=len(chunk_args),
+                    desc=f"Encoding {os.path.basename(input_path)}",
+                )
+            )
 
         return np.concatenate(chunk_arrays)
 
     def decode(self, ids: list[int]) -> str:
-        return b''.join(self.vocab[i] for i in ids).decode('utf-8', errors='replace')
+        return b"".join(
+            self.vocab[i]
+            for i in ids
+        ).decode(
+            "utf-8",
+            errors="replace",
+        )
 
 class Linear(nn.Module):
     def __init__(self, in_features, out_features, device=None, dtype=None):
