@@ -9,7 +9,8 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from hw1 import BPETrainer, Tokenizer, Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, MultiHeadSelfAttention, TransformerBlock, TransformerLM, AdamW
+from src.tokenizer import BPETrainer, Tokenizer
+from hw1 import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, MultiHeadSelfAttention, TransformerBlock, TransformerLM, AdamW
 from hw1 import softmax, scaled_dot_product_attention, cross_entropy, get_cosine_lr, clip_gradient, data_loader, save_checkpoint, load_checkpoint
 
 def run_linear(
