@@ -1,6 +1,7 @@
 import cProfile
 import pstats
 
+import os
 import argparse
 import random
 
@@ -10,6 +11,7 @@ import wandb
 from omegaconf import OmegaConf
 
 from configs.defaults import Config
+# from src.tokenizer import Tokenizer
 from hw1 import *
 
 if __name__ == "__main__":
@@ -73,24 +75,28 @@ if __name__ == "__main__":
     max_val_examples = cfg.training.max_val_examples
 
     # ── Data ──────────────────────────────────────────────────────────────────
-    special_tokens = ["<|endoftext|>"]
-    tokenizer = Tokenizer.from_files(
-        vocab_filepath="vocab.json",
-        merges_filepath="merges.txt",
-        special_tokens=special_tokens,
-    )
-    def tokenize_to_bin(input_path, dataset_bin):
-        if not os.path.exists(dataset_bin):
-            arr = tokenizer.encode_file_parallel(input_path)
-            arr.tofile(dataset_bin)
-            n_tokens = len(arr)
-            del arr
-        else:
-            n_tokens = os.path.getsize(dataset_bin) // np.dtype(np.int32).itemsize
-        return np.memmap(dataset_bin, dtype=np.int32, mode="r", shape=(n_tokens,))
+    # def tokenize_to_bin(input_path, dataset_bin):
+    #     special_tokens = ["<|endoftext|>"]
+    #     tokenizer = Tokenizer.from_files(
+    #         vocab_filepath="vocab.json",
+    #         merges_filepath="merges.txt",
+    #         special_tokens=special_tokens,
+    #     )
+    #     if not os.path.exists(dataset_bin):
+    #         arr = tokenizer.encode_file_parallel(input_path)
+    #         arr.tofile(dataset_bin)
+    #         n_tokens = len(arr)
+    #         del arr
+    #     else:
+    #         n_tokens = os.path.getsize(dataset_bin) // np.dtype(cfg.paths.dataset_dtype).itemsize
+    #     return np.memmap(dataset_bin, dtype=cfg.paths.dataset_dtype, mode="r", shape=(n_tokens,))
 
-    train_dataset = tokenize_to_bin(cfg.paths.train_text_file, cfg.paths.train_bin_file)
-    val_dataset = tokenize_to_bin(cfg.paths.val_text_file, cfg.paths.val_bin_file)
+    def load_bin(dataset_bin):
+        n_tokens = os.path.getsize(dataset_bin) // np.dtype(cfg.paths.dataset_dtype).itemsize
+        return np.memmap(dataset_bin, dtype=cfg.paths.dataset_dtype, mode="r", shape=(n_tokens,))
+
+    train_dataset = load_bin(cfg.paths.train_bin_file)
+    val_dataset = load_bin(cfg.paths.val_bin_file)
 
     # ── Logging ──────────────────────────────────────────────────────────────
     wandb.init(
@@ -100,14 +106,14 @@ if __name__ == "__main__":
     )
 
     # ── Model + optimizer ────────────────────────────────────────────────────
-    actual_vocab_size = max(tokenizer.vocab.keys()) + 1
+    # actual_vocab_size = max(tokenizer.vocab.keys()) + 1
     model = TransformerLM(
         d_model=d_model,
         num_heads=num_heads,
         d_ff=d_ff,
         theta=theta,
         context_length=context_len,
-        vocab_size=actual_vocab_size,
+        vocab_size=cfg.training.vocab_size,
         num_layers=num_layers,
     ).to(device)
 

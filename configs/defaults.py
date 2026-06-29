@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List
+import numpy as np
 
 
 @dataclass
@@ -8,6 +9,7 @@ class PathConfig:
     val_text_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.txt"
     train_bin_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-train.bin"
     val_bin_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.bin"
+    dataset_dtype: type = np.int16
     output_dir: str = "outputs/prt"
 
 @dataclass
@@ -18,6 +20,7 @@ class TrainingConfig:
     # dtype: str = "bfloat16"
 
     # model architecture
+    vocab_size: int = 10000
     context_len: int = 256
     d_model: int = 512
     num_heads: int = 16
