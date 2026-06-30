@@ -2,6 +2,7 @@ import cProfile
 import pstats
 
 import os
+import json
 import argparse
 import random
 
@@ -70,7 +71,6 @@ if __name__ == "__main__":
     betas = (cfg.training.adam_beta1, cfg.training.adam_beta2)
     warmup_iters = cfg.training.warmup_iters
     cosine_cycle_iters = cfg.training.cosine_cycle_iters
-    checkpoint_interval = cfg.training.checkpoint_interval
     eval_interval = cfg.training.eval_interval
     max_val_examples = cfg.training.max_val_examples
 
@@ -129,12 +129,17 @@ if __name__ == "__main__":
     checkpoint_dir = cfg.paths.output_dir
     os.makedirs(checkpoint_dir, exist_ok=True)
     latest_checkpoint_path = os.path.join(checkpoint_dir, "checkpoint_latest.pt")
+    best_val_loss_path = os.path.join(checkpoint_dir, "best_val_loss.json")
 
     start_step = 1
+    best_val_loss = float("inf")
     if os.path.exists(latest_checkpoint_path):
         last_step = load_checkpoint(latest_checkpoint_path, model, optimizer)
         start_step = last_step + 1
-        print(f"Resumed from checkpoint at step {last_step}")
+        if os.path.exists(best_val_loss_path):
+            with open(best_val_loss_path) as f:
+                best_val_loss = json.load(f)["best_val_loss"]
+        print(f"Resumed from checkpoint at step {last_step} (best_val_loss={best_val_loss:.4f})")
 
     # ── Training loop ────────────────────────────────────────────────────────
     model.train()
@@ -151,8 +156,6 @@ if __name__ == "__main__":
         if step % log_interval == 0:
             print(f"step {step:>6} | loss {loss.item():.4f} | lr {lr:.2e}")
             wandb.log({"train/loss": loss.item(), "train/lr": lr}, step=step)
-        if checkpoint_interval > 0 and step % checkpoint_interval == 0:
-            save_checkpoint(model, optimizer, step, latest_checkpoint_path)
         if eval_interval > 0 and step % eval_interval == 0:
             model.eval()
             num_val_batches = max(1, max_val_examples // batch_size)
@@ -165,7 +168,11 @@ if __name__ == "__main__":
             val_loss = sum(val_losses) / len(val_losses)
             print(f"step {step:>6} | val_loss {val_loss:.4f}")
             wandb.log({"val/loss": val_loss}, step=step)
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                save_checkpoint(model, optimizer, step, latest_checkpoint_path)
+                with open(best_val_loss_path, "w") as f:
+                    json.dump({"best_val_loss": best_val_loss}, f)
             model.train()
 
-    save_checkpoint(model, optimizer, num_iters, latest_checkpoint_path)
     wandb.finish()
