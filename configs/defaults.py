@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import List
-import numpy as np
 
 
 @dataclass
@@ -9,7 +8,7 @@ class PathConfig:
     val_text_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.txt"
     train_bin_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-train.bin"
     val_bin_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.bin"
-    dataset_dtype: type = np.int16
+    dataset_dtype: str = "uint16"
     output_dir: str = "outputs/prt"
 
 @dataclass
@@ -33,7 +32,7 @@ class TrainingConfig:
     # training loop
     batch_size: int = 64
     num_iters: int = 5000
-    log_interval: int = 100
+    log_interval: int = 10
     warmup_iters: int = 1
     cosine_cycle_iters: int = 10
 
@@ -53,7 +52,7 @@ class TrainingConfig:
     max_tokens: int = 1024
     
     # evaluation
-    eval_interval: int = 4                              # evaluate every N grpo steps (-1 = disabled)
+    eval_interval: int = 100                            # evaluate every N grpo steps (-1 = disabled)
     max_val_examples: int = 1024                        # max number of val examples per eval
 
     # checkpointing
