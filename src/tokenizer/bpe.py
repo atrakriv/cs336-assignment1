@@ -3,7 +3,7 @@ from collections import defaultdict
 from multiprocessing import Pool
 from tqdm import tqdm
 
-from .utils import find_chunk_boundaries
+from .tkz_utils import find_chunk_boundaries
 
 class BPETrainer:
     PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""

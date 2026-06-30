@@ -7,7 +7,7 @@ from multiprocessing import Pool
 import numpy as np
 from tqdm import tqdm
 
-from .utils import find_chunk_boundaries
+from .tkz_utils import find_chunk_boundaries
 
 class Tokenizer:
     PAT = (
