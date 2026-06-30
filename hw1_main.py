@@ -14,6 +14,7 @@ from omegaconf import OmegaConf
 from configs.defaults import Config
 # from src.tokenizer import Tokenizer
 from hw1 import *
+from util import WallclockTimer
 
 if __name__ == "__main__":
 
@@ -133,13 +134,19 @@ if __name__ == "__main__":
 
     start_step = 1
     best_val_loss = float("inf")
+    wallclock_offset = 0.0  # seconds accumulated across prior (resumed) runs
     if os.path.exists(latest_checkpoint_path):
         last_step = load_checkpoint(latest_checkpoint_path, model, optimizer)
         start_step = last_step + 1
         if os.path.exists(best_val_loss_path):
             with open(best_val_loss_path) as f:
-                best_val_loss = json.load(f)["best_val_loss"]
-        print(f"Resumed from checkpoint at step {last_step} (best_val_loss={best_val_loss:.4f})")
+                state = json.load(f)
+                best_val_loss = state["best_val_loss"]
+                wallclock_offset = state.get("cumulative_wallclock_sec", 0.0)
+        print(f"Resumed from checkpoint at step {last_step} (best_val_loss={best_val_loss:.4f}, "
+              f"wallclock_so_far={wallclock_offset:.1f}s)")
+
+    timer = WallclockTimer(wallclock_offset)
 
     # ── Training loop ────────────────────────────────────────────────────────
     model.train()
@@ -154,8 +161,9 @@ if __name__ == "__main__":
         clip_gradient(model.parameters(), max_norm = 1.0)
         optimizer.step()
         if step % log_interval == 0:
-            print(f"step {step:>6} | loss {loss.item():.4f} | lr {lr:.2e}")
-            wandb.log({"train/loss": loss.item(), "train/lr": lr}, step=step)
+            elapsed = timer.elapsed()
+            print(f"step {step:>6} | loss {loss.item():.4f} | lr {lr:.2e} | time {elapsed:.1f}s")
+            wandb.log({"train/loss": loss.item(), "train/lr": lr, "train/wallclock_sec": elapsed}, step=step)
         if eval_interval > 0 and step % eval_interval == 0:
             model.eval()
             num_val_batches = max(1, max_val_examples // batch_size)
@@ -166,13 +174,14 @@ if __name__ == "__main__":
                     val_logits = model(x_val)
                     val_losses.append(cross_entropy(val_logits, y_val).item())
             val_loss = sum(val_losses) / len(val_losses)
-            print(f"step {step:>6} | val_loss {val_loss:.4f}")
-            wandb.log({"val/loss": val_loss}, step=step)
+            elapsed = timer.elapsed()
+            print(f"step {step:>6} | val_loss {val_loss:.4f} | time {elapsed:.1f}s")
+            wandb.log({"val/loss": val_loss, "val/wallclock_sec": elapsed}, step=step)
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 save_checkpoint(model, optimizer, step, latest_checkpoint_path)
                 with open(best_val_loss_path, "w") as f:
-                    json.dump({"best_val_loss": best_val_loss}, f)
+                    json.dump({"best_val_loss": best_val_loss, "cumulative_wallclock_sec": elapsed}, f)
             model.train()
 
     wandb.finish()
