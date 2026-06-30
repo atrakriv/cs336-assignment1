@@ -1,6 +1,3 @@
-import cProfile
-import pstats
-
 import os
 import json
 import argparse
@@ -16,31 +13,12 @@ from configs.defaults import Config
 from hw1 import *
 from util import WallclockTimer
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
 
-    # input_path = "data/tiny-stories/TinyStoriesV2-GPT4-train.txt"
-    # vocab_size = 10
-    # special_tokens = ['<|endoftext|>']
-    
-    # with cProfile.Profile() as pr:
-    #     vocab, merges = BPETrainer(vocab_size, special_tokens).train(input_path)
-
-    # stats = pstats.Stats(pr)
-    # stats.sort_stats("cumulative")
-    # stats.print_stats(20)
-
-    # with open("vocab.json", "w") as f:
-    #     json.dump({str(k): list(v) for k, v in vocab.items()}, f)
-    
-    # with open("merges.txt", "w") as f:
-    #     json.dump([(list(a), list(b)) for a, b in merges], f)
-
-    
     # ── Load the config ──────────────────────────────────────────────────────
-    
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default=None, help="Path to a yaml config file (overrides defaults)")
-    args = parser.parse_args()
+    args, overrides = parser.parse_known_args()  # extra args as dotlist overrides, e.g. training.max_lr=3e-4
 
     default_config = OmegaConf.structured(Config)
 
@@ -48,6 +26,9 @@ if __name__ == "__main__":
         cfg = OmegaConf.merge(default_config, OmegaConf.load(args.config))
     else:
         cfg = default_config
+
+    if overrides:
+        cfg = OmegaConf.merge(cfg, OmegaConf.from_dotlist(overrides))
 
     # ── Reproducibility ──────────────────────────────────────────────────────
     seed = cfg.training.seed
@@ -100,9 +81,10 @@ if __name__ == "__main__":
     val_dataset = load_bin(cfg.paths.val_bin_file)
 
     # ── Logging ──────────────────────────────────────────────────────────────
+    in_sweep = os.environ.get("WANDB_SWEEP_ID") is not None
     wandb.init(
         project=cfg.training.wandb_project,
-        name=cfg.training.wandb_run_name,
+        name=None if in_sweep else cfg.training.wandb_run_name,
         config=OmegaConf.to_container(cfg, resolve=True),
     )
 
