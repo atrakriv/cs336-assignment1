@@ -1,5 +1,6 @@
 program: hw1_main.py
 method: bayes
+run_cap: 10
 metric:
   name: val/loss
   goal: minimize
@@ -25,7 +26,8 @@ early_terminate:
   min_iter: 100
 
 command:
-  - ${env}
+  - uv
+  - run
   - python
   - ${program}
   - ${args_no_hyphens}

@@ -4,10 +4,10 @@ from typing import List
 
 @dataclass
 class PathConfig:
-    train_text_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-train.txt"
-    val_text_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.txt"
-    train_bin_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-train.bin"
-    val_bin_file: str = "data/tiny-stories/TinyStoriesV2-GPT4-valid.bin"
+    train_text_file: str = "data/tinystories/TinyStoriesV2-GPT4-train.txt"
+    val_text_file: str = "data/tinystories/TinyStoriesV2-GPT4-valid.txt"
+    train_bin_file: str = "data/tinystories/TinyStoriesV2-GPT4-train.bin"
+    val_bin_file: str = "data/tinystories/TinyStoriesV2-GPT4-valid.bin"
     dataset_dtype: str = "uint16"
     output_dir: str = "outputs"
 
@@ -35,8 +35,8 @@ class TrainingConfig:
     log_interval: int = 10
 
     # AdamW optimizer
-    min_lr: float = 3e-5
     max_lr: float = 3e-4
+    min_lr_ratio: float = 0.1  # min_lr = max_lr * min_lr_ratio
     warmup_iters: int = 250
     cosine_cycle_iters: int = 5000
     weight_decay: float = 0.1

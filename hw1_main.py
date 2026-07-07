@@ -11,7 +11,7 @@ from omegaconf import OmegaConf
 from configs.defaults import Config
 # from src.tokenizer import Tokenizer
 from hw1 import *
-from util import WallclockTimer
+from utils import WallclockTimer
 
 if __name__ == "__main__":    
 
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     num_layers = cfg.training.num_layers
     theta = cfg.training.theta
     max_lr = cfg.training.max_lr
-    min_lr = cfg.training.min_lr
+    min_lr = max_lr * cfg.training.min_lr_ratio
     betas = (cfg.training.adam_beta1, cfg.training.adam_beta2)
     warmup_iters = cfg.training.warmup_iters
     cosine_cycle_iters = cfg.training.cosine_cycle_iters
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     )
 
     # ── Checkpointing ────────────────────────────────────────────────────────
-    checkpoint_dir = cfg.paths.output_dir
+    checkpoint_dir = os.path.join(cfg.paths.output_dir, wandb.run.id) if in_sweep else cfg.paths.output_dir
     os.makedirs(checkpoint_dir, exist_ok=True)
     latest_checkpoint_path = os.path.join(checkpoint_dir, "checkpoint_latest.pt")
     best_val_loss_path = os.path.join(checkpoint_dir, "best_val_loss.json")
