@@ -4,7 +4,7 @@ method: grid
 
 parameters:
   training.max_lr:
-    values: [3e-5, 1e-4, 3e-4, 1e-3, 2e-3, 3e-3, 1e-2]  # last two expected to diverge
+    values: [3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2]  # last two expected to diverge
   training.num_iters:
     value: 800
   training.cosine_cycle_iters:
