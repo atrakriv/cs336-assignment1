@@ -9,7 +9,6 @@ import wandb
 from omegaconf import OmegaConf
 
 from configs.defaults import Config
-# from src.tokenizer import Tokenizer
 from hw1 import *
 from utils import WallclockTimer
 
@@ -57,22 +56,6 @@ if __name__ == "__main__":
     max_val_examples = cfg.training.max_val_examples
 
     # ── Data ──────────────────────────────────────────────────────────────────
-    # def tokenize_to_bin(input_path, dataset_bin):
-    #     special_tokens = ["<|endoftext|>"]
-    #     tokenizer = Tokenizer.from_files(
-    #         vocab_filepath="vocab.json",
-    #         merges_filepath="merges.txt",
-    #         special_tokens=special_tokens,
-    #     )
-    #     if not os.path.exists(dataset_bin):
-    #         arr = tokenizer.encode_file_parallel(input_path)
-    #         arr.tofile(dataset_bin)
-    #         n_tokens = len(arr)
-    #         del arr
-    #     else:
-    #         n_tokens = os.path.getsize(dataset_bin) // np.dtype(cfg.paths.dataset_dtype).itemsize
-    #     return np.memmap(dataset_bin, dtype=cfg.paths.dataset_dtype, mode="r", shape=(n_tokens,))
-
     def load_bin(dataset_bin):
         n_tokens = os.path.getsize(dataset_bin) // np.dtype(cfg.paths.dataset_dtype).itemsize
         return np.memmap(dataset_bin, dtype=cfg.paths.dataset_dtype, mode="r", shape=(n_tokens,))
