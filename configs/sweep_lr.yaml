@@ -1,4 +1,5 @@
 program: hw1_main.py
+project: cs336-hw1
 method: bayes
 run_cap: 10
 metric:
