@@ -53,7 +53,19 @@ class SwiGLU(nn.Module):
         gate = self.w3(x)
         return self.w2(swish * gate)
         #return self.w2(F.silu(self.w1(x)) * self.w3(x))
-    
+
+class FFNSiLU(nn.Module):
+    def __init__(self, d_model: int, d_ff: int, device=None, dtype=None):
+        super().__init__()
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.w1 = Linear(d_model, d_ff, **factory_kwargs)
+        self.w2 = Linear(d_ff, d_model, **factory_kwargs)
+    def forward(self, x):
+        x = self.w1(x)
+        x = x * torch.sigmoid(x)      # Equivalent to F.silu(x)
+        x = self.w2(x)
+        return x
+   
 class RotaryPositionalEmbedding(nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
         super().__init__()
