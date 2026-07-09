@@ -23,7 +23,7 @@ class TrainingConfig:
     context_len: int = 256
     d_model: int = 512
     num_heads: int = 16
-    d_ff: int = 2048                                    # ~ d_model * 4
+    d_ff: int = 1344                                    # ~ d_model * 8/3 & d_ff % 64 == 0
     num_layers: int = 4
     theta: float = 10_000.0
     # use_compile: bool = False                         # whether to use torch.compile for the model
