@@ -35,7 +35,7 @@ class TrainingConfig:
     log_interval: int = 10
 
     # AdamW optimizer
-    max_lr: float = 3e-4
+    max_lr: float = 3e-3
     min_lr_ratio: float = 0.1  # min_lr = max_lr * min_lr_ratio
     warmup_iters: int = 250
     cosine_cycle_iters: int = 5000
