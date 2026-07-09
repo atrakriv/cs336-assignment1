@@ -134,9 +134,9 @@ class TransformerBlock(nn.Module):
         d_head = d_model // num_heads
         self.ln1 = RMSNorm(d_model, eps, device, dtype)
         self.ln2 = RMSNorm(d_model, eps, device, dtype) 
-        self.rope = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
-        self.attn = MultiHeadSelfAttention(d_model, num_heads, self.rope, device, dtype)
-        self.ffn = FFNSiLU(d_model, d_ff, device, dtype)
+        # self.rope = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
+        self.attn = MultiHeadSelfAttention(d_model, num_heads, None, device, dtype)
+        self.ffn = SwiGLU(d_model, d_ff, device, dtype)
     def forward(self, x):
         token_positions = torch.arange(x.shape[1])
         y = x + self.attn(self.ln1(x), token_positions)
