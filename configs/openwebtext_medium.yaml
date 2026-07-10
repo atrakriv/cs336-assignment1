@@ -1,0 +1,36 @@
+paths:
+  train_bin_file: data/openwebtext/OpenWebText-train.bin'
+  val_bin_file: data/openwebtext/OpenWebText-valid.bin'
+  dataset_dtype: uint16
+
+training:
+  # model — ~124M params (GPT-2 small scale)
+  vocab_size: 50257
+  context_len: 1024
+  d_model: 768
+  num_heads: 12
+  d_ff: 2048                  # ~ d_model * 8/3, d_ff % 64 == 0
+  num_layers: 12
+  theta: 10000.0
+
+  # training
+  batch_size: 32
+  num_iters: 100000
+  log_interval: 10
+
+  # lr schedule
+  max_lr: 6e-4
+  min_lr_ratio: 0.1
+  warmup_iters: 2000
+  cosine_cycle_iters: 100000
+  weight_decay: 0.1
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+
+  # eval
+  eval_interval: 500
+  max_val_examples: 1024
+
+  # wandb
+  wandb_project: cs336-hw1
+  wandb_run_name: owt-medium
