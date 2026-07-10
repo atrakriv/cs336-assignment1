@@ -1,11 +1,11 @@
 paths:
-  train_bin_file: data/openwebtext/OpenWebText-train.bin'
-  val_bin_file: data/openwebtext/OpenWebText-valid.bin'
+  train_bin_file: data/openwebtext/OpenWebText-train.bin
+  val_bin_file: data/openwebtext/OpenWebText-valid.bin
   dataset_dtype: uint16
 
 training:
   # model — ~124M params (GPT-2 small scale)
-  vocab_size: 50257
+  vocab_size: 32000
   context_len: 1024
   d_model: 768
   num_heads: 12
