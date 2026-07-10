@@ -1,11 +1,7 @@
 from dataclasses import dataclass, field
-from typing import List
-
 
 @dataclass
 class PathConfig:
-    train_text_file: str = "data/tinystories/TinyStoriesV2-GPT4-train.txt"
-    val_text_file: str = "data/tinystories/TinyStoriesV2-GPT4-valid.txt"
     train_bin_file: str = "data/tinystories/TinyStoriesV2-GPT4-train.bin"
     val_bin_file: str = "data/tinystories/TinyStoriesV2-GPT4-valid.bin"
     dataset_dtype: str = "uint16"
@@ -55,9 +51,9 @@ class TrainingConfig:
     max_tokens: int = 1024
 
     # wandb
-    wandb_project: str = "cs336-hw1"                    # wandb project name (empty = disabled)
+    wandb_project: str = "cs336-hw1"                    # wandb project name
     wandb_run_name: str = "celestial-universe"          # wandb run name
-    # wandb_tags: List[str] = field(default_factory=lambda: ["prt"])
+   
     
     
 @dataclass
