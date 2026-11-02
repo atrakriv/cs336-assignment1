@@ -109,7 +109,9 @@ class MultiHeadSelfAttention(nn.Module):
         self.v_proj = Linear(d_model, d_model, **factory_kwargs)
         self.output_proj = Linear(d_model, d_model, **factory_kwargs)
         self.rope = rope
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None):
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None,
+                past_kv: tuple[torch.Tensor, torch.Tensor] | None = None, use_cache: bool = False):
+        # past_kv: (K, V) of shape [bsz, heads, past_len, d_head]; K is stored post-RoPE
         seq_len = x.shape[1]
         Q = self._split_heads(self.q_proj(x))
         K = self._split_heads(self.k_proj(x))
@@ -118,9 +120,18 @@ class MultiHeadSelfAttention(nn.Module):
             Q = self.rope(Q, token_positions)
             K = self.rope(K, token_positions)
         V = self._split_heads(self.v_proj(x))
-        mask = torch.tril(torch.ones(1, 1, seq_len, seq_len, device=x.device)).bool()
+        past_len = 0
+        if past_kv is not None:
+            past_len = past_kv[0].shape[2]
+            K = torch.cat([past_kv[0], K], dim=2)
+            V = torch.cat([past_kv[1], V], dim=2)
+        # query i (absolute position past_len + i) attends to keys j <= past_len + i
+        q_pos = torch.arange(past_len, past_len + seq_len, device=x.device)
+        k_pos = torch.arange(past_len + seq_len, device=x.device)
+        mask = k_pos <= q_pos[:, None]  # [seq_len, total_len]; broadcasts over [bsz, heads, ...]
         y = scaled_dot_product_attention(Q, K, V, mask)
-        return self.output_proj(self._merge_heads(y))
+        out = self.output_proj(self._merge_heads(y))
+        return (out, (K, V)) if use_cache else out
     def _split_heads(self, t):
         bsz, seq_len = t.shape[:-1]
         return t.view(bsz, seq_len, self.num_heads, self.d_head).transpose(1, 2)
@@ -137,11 +148,16 @@ class TransformerBlock(nn.Module):
         self.rope = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
         self.attn = MultiHeadSelfAttention(d_model, num_heads, self.rope, device, dtype)
         self.ffn = SwiGLU(d_model, d_ff, device, dtype)
-    def forward(self, x):
-        token_positions = torch.arange(x.shape[1])
-        y = x + self.attn(self.ln1(x), token_positions)
+    def forward(self, x, past_kv=None, use_cache=False):
+        past_len = 0 if past_kv is None else past_kv[0].shape[2]
+        token_positions = torch.arange(past_len, past_len + x.shape[1])
+        if use_cache:
+            a, present = self.attn(self.ln1(x), token_positions, past_kv, use_cache=True)
+        else:
+            a, present = self.attn(self.ln1(x), token_positions), None
+        y = x + a
         y = y + self.ffn(self.ln2(y))
-        return y
+        return (y, present) if use_cache else y
 
 class TransformerLM(nn.Module): # are context_length and max_seq_len the same thing?
     def __init__(self, d_model, num_heads, d_ff, theta, context_length, vocab_size, num_layers, eps: float = 1e-5, device=None):
@@ -153,13 +169,19 @@ class TransformerLM(nn.Module): # are context_length and max_seq_len the same th
             for _ in range(num_layers)])
         self.ln_final = RMSNorm(d_model, eps, device)
         self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
-    def forward(self, x):
+    def forward(self, x, past_kvs=None, use_cache=False):
+        # past_kvs: per-layer list of (K, V); with use_cache=True returns (logits, new past_kvs)
         x = self.token_embeddings(x)
+        presents = []
         for i in range(self.num_layers):
-            x = self.layers[i](x)
+            if use_cache:
+                x, present = self.layers[i](x, None if past_kvs is None else past_kvs[i], use_cache=True)
+                presents.append(present)
+            else:
+                x = self.layers[i](x)
         x = self.ln_final(x)
         x = self.lm_head (x)
-        return x
+        return (x, presents) if use_cache else x
     
 # use for hw only
 def cross_entropy_(inputs, targets):

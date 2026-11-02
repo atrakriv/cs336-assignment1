@@ -5,6 +5,8 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
+from tokenizers import Tokenizer
+
 from configs.defaults import Config
 from hw1 import *
 
@@ -24,10 +26,18 @@ def top_p_sample(logits: torch.Tensor, top_p: float) -> torch.Tensor:
 def generate(model, prompt_ids, context_len, max_new_tokens, temperature, top_p, min_tokens, eos_id, device):
     model.eval()
     ids = list(prompt_ids)
+    past_kvs = None
+    cache_len = 0
     for _ in range(max_new_tokens):
-        context = ids[-context_len:]
-        x = torch.tensor([context], dtype=torch.long, device=device)
-        logits = model(x)[:, -1, :] / max(temperature, 1e-6)
+        if past_kvs is not None and cache_len < context_len:
+            new_tokens = ids[-1:]  # decode step: only the newest token
+        else:
+            # first step, or window full (RoPE positions are absolute): re-prefill the last context_len tokens
+            new_tokens, past_kvs, cache_len = ids[-context_len:], None, 0
+        x = torch.tensor([new_tokens], dtype=torch.long, device=device)
+        logits, past_kvs = model(x, past_kvs, use_cache=True)
+        cache_len += len(new_tokens)
+        logits = logits[:, -1, :] / max(temperature, 1e-6)
         next_id = top_p_sample(logits, top_p).item()
         ids.append(next_id)
         if eos_id is not None and next_id == eos_id and len(ids) - len(prompt_ids) >= min_tokens:
