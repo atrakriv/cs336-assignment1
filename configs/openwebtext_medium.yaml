@@ -14,7 +14,7 @@ training:
   theta: 10000.0
 
   # training
-  batch_size: 32
+  batch_size: 8   # 32 OOMs on A100-80GB in fp32; use bf16 or grad-ckpt to go larger
   num_iters: 100000
   log_interval: 10
 
