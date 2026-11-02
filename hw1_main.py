@@ -81,6 +81,8 @@ if __name__ == "__main__":
         context_length=context_len,
         vocab_size=cfg.training.vocab_size,
         num_layers=num_layers,
+        num_experts=cfg.training.num_experts,
+        top_k=cfg.training.top_k,
     ).to(device)
 
     optimizer = AdamW(
@@ -120,15 +122,18 @@ if __name__ == "__main__":
         for pg in optimizer.param_groups: pg['lr'] = lr
         x, y = data_loader(train_dataset, batch_size, context_len, device)
         logits = model(x)  # (B, T, V)
-        loss = cross_entropy(logits, y)
+        ce_loss = cross_entropy(logits, y)
+        aux_loss = model.aux_loss
+        loss = ce_loss + cfg.training.aux_loss_coef * aux_loss
         optimizer.zero_grad()
         loss.backward()
         clip_gradient(model.parameters(), max_norm = 1.0)
         optimizer.step()
         if step % log_interval == 0:
             elapsed = timer.elapsed()
-            print(f"step {step:>6} | loss {loss.item():.4f} | lr {lr:.2e} | time {elapsed:.1f}s")
-            wandb.log({"train/loss": loss.item(), "train/lr": lr, "train/wallclock_sec": elapsed}, step=step)
+            print(f"step {step:>6} | loss {ce_loss.item():.4f} | aux {aux_loss.item():.4f} | lr {lr:.2e} | time {elapsed:.1f}s")
+            wandb.log({"train/loss": ce_loss.item(), "train/aux_loss": aux_loss.item(), "train/total_loss": loss.item(),
+                       "train/lr": lr, "train/wallclock_sec": elapsed}, step=step)
         if eval_interval > 0 and step % eval_interval == 0:
             model.eval()
             num_val_batches = max(1, max_val_examples // batch_size)

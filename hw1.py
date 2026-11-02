@@ -54,6 +54,34 @@ class SwiGLU(nn.Module):
         return self.w2(swish * gate)
         #return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
+class MoE(nn.Module):
+    """Top-k routed mixture of SwiGLU experts, with a Switch-style load-balancing loss in self.aux_loss."""
+    def __init__(self, d_model: int, d_ff: int, num_experts: int, top_k: int, device=None, dtype=None):
+        super().__init__()
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.num_experts = num_experts
+        self.top_k = top_k
+        self.router = Linear(d_model, num_experts, **factory_kwargs)
+        self.experts = nn.ModuleList([SwiGLU(d_model, d_ff, **factory_kwargs) for _ in range(num_experts)])
+        self.aux_loss = torch.zeros(())
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        shape = x.shape
+        x = x.reshape(-1, shape[-1])                                  # [N, d_model]
+        probs = softmax(self.router(x).float(), dim=-1)               # [N, E]
+        top_p, top_i = probs.topk(self.top_k, dim=-1)                 # [N, k]
+        top_p = (top_p / top_p.sum(dim=-1, keepdim=True)).to(x.dtype) # renormalize over chosen experts
+        out = torch.zeros_like(x)
+        for e, expert in enumerate(self.experts):
+            token_idx, slot = (top_i == e).nonzero(as_tuple=True)
+            if token_idx.numel() == 0: continue
+            out.index_add_(0, token_idx, expert(x[token_idx]) * top_p[token_idx, slot].unsqueeze(-1))
+        # load balancing: E * sum_e (fraction of assignments to e) * (mean router prob of e)
+        frac = torch.zeros(self.num_experts, device=x.device).scatter_add_(
+            0, top_i.reshape(-1), torch.ones(top_i.numel(), device=x.device)) / top_i.numel()
+        self.aux_loss = self.num_experts * (frac * probs.mean(dim=0)).sum()
+        return out.reshape(shape)
+
 class FFNSiLU(nn.Module):
     def __init__(self, d_model: int, d_ff: int, device=None, dtype=None):
         super().__init__()
@@ -129,14 +157,15 @@ class MultiHeadSelfAttention(nn.Module):
         return x.transpose(1, 2).contiguous().view(bsz, seq_len, self.d_model)
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, max_seq_len, theta, eps: float = 1e-5, device=None, dtype=None):
+    def __init__(self, d_model, num_heads, d_ff, max_seq_len, theta, eps: float = 1e-5, device=None, dtype=None,
+                 num_experts: int = 8, top_k: int = 2):
         super().__init__()
         d_head = d_model // num_heads
         self.ln1 = RMSNorm(d_model, eps, device, dtype)
         self.ln2 = RMSNorm(d_model, eps, device, dtype) 
         self.rope = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
         self.attn = MultiHeadSelfAttention(d_model, num_heads, self.rope, device, dtype)
-        self.ffn = SwiGLU(d_model, d_ff, device, dtype)
+        self.ffn = MoE(d_model, d_ff, num_experts, top_k, device, dtype)
     def forward(self, x):
         token_positions = torch.arange(x.shape[1])
         y = x + self.attn(self.ln1(x), token_positions)
@@ -144,12 +173,13 @@ class TransformerBlock(nn.Module):
         return y
 
 class TransformerLM(nn.Module): # are context_length and max_seq_len the same thing?
-    def __init__(self, d_model, num_heads, d_ff, theta, context_length, vocab_size, num_layers, eps: float = 1e-5, device=None):
+    def __init__(self, d_model, num_heads, d_ff, theta, context_length, vocab_size, num_layers, eps: float = 1e-5, device=None,
+                 num_experts: int = 8, top_k: int = 2):
         super().__init__()
         self.token_embeddings = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
         self.num_layers = num_layers
         self.layers = nn.ModuleList([
-            TransformerBlock(d_model, num_heads, d_ff, context_length, theta) 
+            TransformerBlock(d_model, num_heads, d_ff, context_length, theta, num_experts=num_experts, top_k=top_k)
             for _ in range(num_layers)])
         self.ln_final = RMSNorm(d_model, eps, device)
         self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
@@ -160,6 +190,10 @@ class TransformerLM(nn.Module): # are context_length and max_seq_len the same th
         x = self.ln_final(x)
         x = self.lm_head (x)
         return x
+    @property
+    def aux_loss(self):
+        """Mean load-balancing loss across layers from the latest forward; add (scaled, e.g. 0.01) to the CE loss."""
+        return sum(layer.ffn.aux_loss for layer in self.layers) / self.num_layers
     
 # use for hw only
 def cross_entropy_(inputs, targets):

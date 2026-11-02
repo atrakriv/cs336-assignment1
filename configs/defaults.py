@@ -21,6 +21,9 @@ class TrainingConfig:
     num_heads: int = 16
     d_ff: int = 1344                                    # ~ d_model * 8/3 & d_ff % 64 == 0
     num_layers: int = 4
+    num_experts: int = 8                                # MoE experts per layer
+    top_k: int = 2                                      # experts activated per token
+    aux_loss_coef: float = 0.01                         # weight of the load-balancing loss
     theta: float = 10_000.0
     # use_compile: bool = False                         # whether to use torch.compile for the model
     # attention_type: str = "flash_attention_2"
