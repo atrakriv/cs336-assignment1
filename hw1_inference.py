@@ -77,6 +77,7 @@ if __name__ == "__main__":
     model = TransformerLM(
         d_model=cfg.training.d_model,
         num_heads=cfg.training.num_heads,
+        num_kv_heads=cfg.training.num_kv_heads,
         d_ff=cfg.training.d_ff,
         theta=cfg.training.theta,
         context_length=cfg.training.context_len,

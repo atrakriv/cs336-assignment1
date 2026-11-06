@@ -98,44 +98,54 @@ def scaled_dot_product_attention(Q, K, V, mask):
     return A@V
 
 class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, d_model, num_heads, rope=None, device=None, dtype=None):
+    """Grouped-query attention: num_heads query heads share num_kv_heads key/value heads.
+    num_kv_heads == num_heads is standard MHA; num_kv_heads == 1 is MQA."""
+    def __init__(self, d_model, num_heads, rope=None, num_kv_heads=None, device=None, dtype=None):
         super().__init__()
         factory_kwargs = {"device": device, "dtype": dtype}
+        num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
+        assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
+        assert num_heads % num_kv_heads == 0, "num_heads must be divisible by num_kv_heads"
         self.d_model = d_model
         self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.n_rep = num_heads // num_kv_heads
         self.d_head = d_model // num_heads
-        self.q_proj = Linear(d_model, d_model, **factory_kwargs)
-        self.k_proj = Linear(d_model, d_model, **factory_kwargs)
-        self.v_proj = Linear(d_model, d_model, **factory_kwargs)
+        self.q_proj = Linear(d_model, num_heads * self.d_head, **factory_kwargs)
+        self.k_proj = Linear(d_model, num_kv_heads * self.d_head, **factory_kwargs)
+        self.v_proj = Linear(d_model, num_kv_heads * self.d_head, **factory_kwargs)
         self.output_proj = Linear(d_model, d_model, **factory_kwargs)
         self.rope = rope
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None):
         seq_len = x.shape[1]
-        Q = self._split_heads(self.q_proj(x))
-        K = self._split_heads(self.k_proj(x))
+        Q = self._split_heads(self.q_proj(x), self.num_heads)
+        K = self._split_heads(self.k_proj(x), self.num_kv_heads)
         if self.rope is not None:
             assert token_positions is not None
             Q = self.rope(Q, token_positions)
             K = self.rope(K, token_positions)
-        V = self._split_heads(self.v_proj(x))
+        V = self._split_heads(self.v_proj(x), self.num_kv_heads)
+        # each kv head serves n_rep consecutive query heads
+        K = K.repeat_interleave(self.n_rep, dim=1)
+        V = V.repeat_interleave(self.n_rep, dim=1)
         mask = torch.tril(torch.ones(1, 1, seq_len, seq_len, device=x.device)).bool()
         y = scaled_dot_product_attention(Q, K, V, mask)
         return self.output_proj(self._merge_heads(y))
-    def _split_heads(self, t):
+    def _split_heads(self, t, n_heads):
         bsz, seq_len = t.shape[:-1]
-        return t.view(bsz, seq_len, self.num_heads, self.d_head).transpose(1, 2)
+        return t.view(bsz, seq_len, n_heads, self.d_head).transpose(1, 2)
     def _merge_heads(self, x: torch.Tensor) -> torch.Tensor:
         bsz, _, seq_len, _ = x.shape
         return x.transpose(1, 2).contiguous().view(bsz, seq_len, self.d_model)
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, max_seq_len, theta, eps: float = 1e-5, device=None, dtype=None):
+    def __init__(self, d_model, num_heads, d_ff, max_seq_len, theta, eps: float = 1e-5, num_kv_heads=None, device=None, dtype=None):
         super().__init__()
         d_head = d_model // num_heads
         self.ln1 = RMSNorm(d_model, eps, device, dtype)
         self.ln2 = RMSNorm(d_model, eps, device, dtype) 
         self.rope = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
-        self.attn = MultiHeadSelfAttention(d_model, num_heads, self.rope, device, dtype)
+        self.attn = MultiHeadSelfAttention(d_model, num_heads, self.rope, num_kv_heads, device, dtype)
         self.ffn = SwiGLU(d_model, d_ff, device, dtype)
     def forward(self, x):
         token_positions = torch.arange(x.shape[1])
@@ -144,12 +154,12 @@ class TransformerBlock(nn.Module):
         return y
 
 class TransformerLM(nn.Module): # are context_length and max_seq_len the same thing?
-    def __init__(self, d_model, num_heads, d_ff, theta, context_length, vocab_size, num_layers, eps: float = 1e-5, device=None):
+    def __init__(self, d_model, num_heads, d_ff, theta, context_length, vocab_size, num_layers, eps: float = 1e-5, num_kv_heads=None, device=None):
         super().__init__()
         self.token_embeddings = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
         self.num_layers = num_layers
         self.layers = nn.ModuleList([
-            TransformerBlock(d_model, num_heads, d_ff, context_length, theta) 
+            TransformerBlock(d_model, num_heads, d_ff, context_length, theta, eps, num_kv_heads) 
             for _ in range(num_layers)])
         self.ln_final = RMSNorm(d_model, eps, device)
         self.lm_head = Linear(in_features=d_model, out_features=vocab_size)

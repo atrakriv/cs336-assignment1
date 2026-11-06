@@ -19,6 +19,7 @@ class TrainingConfig:
     context_len: int = 256
     d_model: int = 512
     num_heads: int = 16
+    num_kv_heads: int = 4                               # GQA: num_heads % num_kv_heads == 0 (=num_heads -> MHA, 1 -> MQA)
     d_ff: int = 1344                                    # ~ d_model * 8/3 & d_ff % 64 == 0
     num_layers: int = 4
     theta: float = 10_000.0
