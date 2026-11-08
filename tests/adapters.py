@@ -10,7 +10,7 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 from src.tokenizer import BPETrainer, Tokenizer
-from hw1 import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, MultiHeadSelfAttention, TransformerBlock, TransformerLM, AdamW
+from hw1 import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, SinusoidalPositionalEmbedding, MultiHeadSelfAttention, TransformerBlock, TransformerLM, AdamW
 from hw1 import softmax, scaled_dot_product_attention, cross_entropy, get_cosine_lr, clip_gradient, data_loader, save_checkpoint, load_checkpoint
 
 def run_linear(
@@ -212,6 +212,30 @@ def run_rope(
     """
     model = RotaryPositionalEmbedding(theta, d_k, max_seq_len)
     return model(in_query_or_key, token_positions)
+
+
+def run_sinusoidal_emb(
+    d_model: int,
+    max_seq_len: int,
+    in_features: Float[Tensor, " ... sequence_length d_model"],
+    token_positions: Int[Tensor, " ... sequence_length"],
+) -> Float[Tensor, " ... sequence_length d_model"]:
+    """
+    Run sinusoidal positional embeddings for a given input tensor.
+
+    Computes in_features + PE[token_positions], where, for position p and pair index i,
+    PE[p, 2i] = sin(p / 10000^(2i/d_model)) and PE[p, 2i+1] = cos(p / 10000^(2i/d_model)).
+
+    Args:
+        d_model (int): Embedding dimension size.
+        max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
+        in_features (Float[Tensor, "... sequence_length d_model"]): Input tensor to add positional embeddings to.
+        token_positions (Int[Tensor, "... sequence_length"]): Tensor of shape (batch_size, sequence_length) with the token positions
+    Returns:
+        Float[Tensor, " ... sequence_length d_model"]: Tensor with positional embeddings applied.
+    """
+    model = SinusoidalPositionalEmbedding(d_model, max_seq_len)
+    return model(in_features, token_positions)
 
 
 def run_transformer_block(

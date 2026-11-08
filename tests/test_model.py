@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from .adapters import (
     run_multihead_self_attention_with_rope,
     run_rope,
+    run_sinusoidal_emb,
     run_silu,
     run_multihead_self_attention,
     run_swiglu,
@@ -186,6 +187,13 @@ def test_rmsnorm(numpy_snapshot, ts_state_dict, in_embeddings):
 def test_rope(numpy_snapshot, in_embeddings, d_model, theta, n_queries, pos_ids):
     output = run_rope(
         d_model, theta=theta, max_seq_len=n_queries, in_query_or_key=in_embeddings, token_positions=pos_ids
+    )
+    numpy_snapshot.assert_match(output, atol=1e-6)
+
+
+def test_sinusoidal_emb(numpy_snapshot, in_embeddings, d_model, n_queries, pos_ids):
+    output = run_sinusoidal_emb(
+        d_model, max_seq_len=n_queries, in_features=in_embeddings, token_positions=pos_ids
     )
     numpy_snapshot.assert_match(output, atol=1e-6)
 

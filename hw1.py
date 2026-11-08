@@ -83,7 +83,23 @@ class RotaryPositionalEmbedding(nn.Module):
         rope = torch.empty_like(x)
         rope[...,0::2], rope[...,1::2] = x_even * cos - x_odd * sin, x_odd * cos + x_even * sin
         return rope
-    
+
+''' uv run pytest -k test_sinusoidal_emb '''
+class SinusoidalPositionalEmbedding(nn.Module):
+    def __init__(self, d_model: int, max_seq_len: int, theta=10000.0, device=None):
+        super().__init__()
+        # inv_freq = 1./theta**(torch.arange(0, d_model, 2, device=device)/d_model)
+        inv_freq = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(theta) / d_model))
+        ps = torch.arange(max_seq_len, device=device)
+        angs = torch.outer(ps, inv_freq)
+        pe = torch.empty(max_seq_len, d_model, device=device)
+        pe[:, 0::2], pe[:, 1::2] = torch.sin(angs), torch.cos(angs)
+        self.register_buffer('pe', pe)                 # [max_seq_len, d_model]
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        token_positions = token_positions.to(x.device) # defensive practice
+        return x + self.pe[token_positions]            # [..., seq_len, d_model]
+
+
 def softmax(x: torch.Tensor, dim: int):
     x_max = x.max(dim=dim, keepdim=True).values
     exp = torch.exp(x - x_max)
