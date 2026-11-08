@@ -81,7 +81,6 @@ def run_swiglu(
     Returns:
         Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
-    print('*****', d_model, d_ff, in_features.shape, w1_weight.shape, w2_weight.shape, w3_weight.shape)
     model = SwiGLU(d_model, d_ff)
     model.load_state_dict({"w1.weight":w1_weight, "w2.weight":w2_weight, "w3.weight":w3_weight})
     return model(in_features)
@@ -187,7 +186,7 @@ def run_multihead_self_attention_with_rope(
     rope = RotaryPositionalEmbedding(theta, d_model//num_heads, max_seq_len)
     model = MultiHeadSelfAttention(d_model=d_model, num_heads=num_heads, rope=rope)
     weights = {"q_proj.weight": q_proj_weight, "k_proj.weight": k_proj_weight, "v_proj.weight": v_proj_weight, "output_proj.weight": o_proj_weight}
-    model.load_state_dict(weights, strict=False)
+    model.load_state_dict(weights)
     return model(in_features, token_positions=token_positions)
 
 
@@ -308,9 +307,8 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    print('****', weights.keys())
     model = TransformerBlock(d_model, num_heads, d_ff, max_seq_len, theta)
-    model.load_state_dict(weights, strict=False)
+    model.load_state_dict(weights)
     return model(in_features)
 
 
@@ -393,9 +391,8 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    print('******', weights.keys())
     model = TransformerLM(d_model, num_heads, d_ff, rope_theta, context_length, vocab_size, num_layers)
-    model.load_state_dict(weights, strict=False)
+    model.load_state_dict(weights)
     return model(in_indices)
    
 
