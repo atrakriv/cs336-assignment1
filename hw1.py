@@ -125,7 +125,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.v_proj = Linear(d_model, d_model, **factory_kwargs)
         self.output_proj = Linear(d_model, d_model, **factory_kwargs)
         self.rope = rope
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None):
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None, attention_mask: torch.Tensor | None = None):
         seq_len = x.shape[1]
         Q = self._split_heads(self.q_proj(x))
         K = self._split_heads(self.k_proj(x))
@@ -135,6 +135,10 @@ class MultiHeadSelfAttention(nn.Module):
             K = self.rope(K, token_positions)
         V = self._split_heads(self.v_proj(x))
         mask = torch.tril(torch.ones(1, 1, seq_len, seq_len, device=x.device)).bool()
+        if attention_mask is not None:                 # [batch, seq_len], True = real token, False = padding
+            keep = attention_mask.to(x.device).bool()[:, None, None, :]   # mask out padded keys
+            eye = torch.eye(seq_len, device=x.device).bool()              # pad queries attend to themselves (avoids all -inf rows -> NaN)
+            mask = (mask & keep) | eye
         y = scaled_dot_product_attention(Q, K, V, mask)
         return self.output_proj(self._merge_heads(y))
     def _split_heads(self, t):
@@ -153,9 +157,13 @@ class TransformerBlock(nn.Module):
         self.rope = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
         self.attn = MultiHeadSelfAttention(d_model, num_heads, self.rope, device, dtype)
         self.ffn = SwiGLU(d_model, d_ff, device, dtype)
-    def forward(self, x):
-        token_positions = torch.arange(x.shape[1])
-        y = x + self.attn(self.ln1(x), token_positions)
+    def forward(self, x, attention_mask=None):
+        if attention_mask is None:
+            token_positions = torch.arange(x.shape[1])
+        else:  # position of each token among the real tokens, so left padding doesn't shift positions
+            token_positions = (attention_mask.long().cumsum(dim=-1) - 1).clamp(min=0)   # [batch, seq_len]
+            token_positions = token_positions[:, None, :]                                # broadcast over heads
+        y = x + self.attn(self.ln1(x), token_positions, attention_mask)
         y = y + self.ffn(self.ln2(y))
         return y
 
@@ -169,10 +177,10 @@ class TransformerLM(nn.Module): # are context_length and max_seq_len the same th
             for _ in range(num_layers)])
         self.ln_final = RMSNorm(d_model, eps, device)
         self.lm_head = Linear(in_features=d_model, out_features=vocab_size)
-    def forward(self, x):
+    def forward(self, x, attention_mask=None):
         x = self.token_embeddings(x)
         for i in range(self.num_layers):
-            x = self.layers[i](x)
+            x = self.layers[i](x, attention_mask)
         x = self.ln_final(x)
         x = self.lm_head (x)
         return x
@@ -184,10 +192,13 @@ def cross_entropy_(inputs, targets):
     log_probs = logits - torch.log(torch.sum(torch.exp(logits), dim=-1, keepdim=True)) # B*T*V
     return -log_probs.gather(-1, targets.unsqueeze(-1)).squeeze(-1).mean()   # squeeze(-1) can be removed
 
-def cross_entropy(logits, targets):
+def cross_entropy(logits, targets, mask=None):
     x = torch.log_softmax(logits, dim=-1)
     logps = x.gather(index=targets.unsqueeze(dim=-1), dim=-1)
-    return -logps.mean()
+    if mask is None:
+        return -logps.mean()
+    mask = mask.to(logps.dtype)                        # True = real token, False = padding
+    return -(logps.squeeze(-1) * mask).sum() / mask.sum().clamp(min=1)
  
 class AdamW(torch.optim.Optimizer):
     def __init__(self, params, lr, betas, weight_decay, eps):
@@ -276,6 +287,50 @@ def data_loader(dataset, batch_size: int, context_length: int, device: str):
     x = torch.tensor(chunk[:, :-1], dtype=torch.long, device=device)
     y = torch.tensor(chunk[:, 1:], dtype=torch.long, device=device)
     return x, y
+
+_doc_bounds_cache = {}
+
+def document_bounds(dataset, eos_id: int, chunk: int = 1 << 24):
+    """(starts, ends) of each document in a flat token stream; a document includes its trailing EOS (end exclusive)."""
+    key = (id(dataset), eos_id)
+    if key not in _doc_bounds_cache:
+        eos_pos = np.concatenate([
+            np.flatnonzero(np.asarray(dataset[i:i + chunk]) == eos_id) + i for i in range(0, len(dataset), chunk)
+        ])
+        ends = eos_pos + 1
+        if len(ends) == 0 or ends[-1] < len(dataset):      # trailing text with no final EOS
+            ends = np.append(ends, len(dataset))
+        starts = np.concatenate([[0], ends[:-1]])
+        keep = ends - starts >= 2                          # need at least one (input, target) pair
+        _doc_bounds_cache[key] = (starts[keep], ends[keep])
+    return _doc_bounds_cache[key]
+
+def data_loader_docs(dataset, batch_size: int, context_length: int, device: str, eos_id: int, pad_id: int = 0):
+    """Like data_loader, but samples whole documents (split on eos_id) instead of fixed windows.
+    Documents longer than context_length + 1 tokens are cut at a random offset.
+    Returns (x, y, mask), all [batch, longest_sampled_len]; mask is True on real tokens."""
+    starts, ends = document_bounds(dataset, eos_id)
+    idx = np.random.randint(0, len(starts), size=batch_size)
+    chunks = []
+    for st, en in zip(starts[idx], ends[idx]):
+        if en - st > context_length + 1:
+            st = np.random.randint(st, en - context_length)
+            en = st + context_length + 1
+        chunks.append(np.asarray(dataset[st:en]))
+    x, mask = pad_batch([c[:-1] for c in chunks], pad_id, device)
+    y, _ = pad_batch([c[1:] for c in chunks], pad_id, device)
+    return x, y, mask
+
+def pad_batch(seqs, pad_id: int = 0, device=None, padding_side: str = "right"):
+    """Pad variable-length token sequences to the longest; returns (ids, attention_mask), both [batch, max_len]."""
+    max_len = max(len(s) for s in seqs)
+    ids = torch.full((len(seqs), max_len), pad_id, dtype=torch.long)
+    mask = torch.zeros(len(seqs), max_len, dtype=torch.bool)
+    for i, s in enumerate(seqs):
+        sl = slice(0, len(s)) if padding_side == "right" else slice(max_len - len(s), max_len)
+        ids[i, sl] = torch.as_tensor(s, dtype=torch.long)
+        mask[i, sl] = True
+    return ids.to(device), mask.to(device)
 
 def save_checkpoint(model, optimizer, iteration, out):
     torch.save({

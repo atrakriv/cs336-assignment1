@@ -21,18 +21,29 @@ def top_p_sample(logits: torch.Tensor, top_p: float) -> torch.Tensor:
 
 
 @torch.no_grad()
-def generate(model, prompt_ids, context_len, max_new_tokens, temperature, top_p, min_tokens, eos_id, device):
+def generate_batch(model, prompts, context_len, max_new_tokens, temperature, top_p, min_tokens, eos_id, device):
+    """Generate for several prompts of different lengths at once (left-padded, masked)."""
     model.eval()
-    ids = list(prompt_ids)
+    seqs = [list(p) for p in prompts]
+    n_prompt = [len(p) for p in seqs]
+    done = [False] * len(seqs)
     for _ in range(max_new_tokens):
-        context = ids[-context_len:]
-        x = torch.tensor([context], dtype=torch.long, device=device)
-        logits = model(x)[:, -1, :] / max(temperature, 1e-6)
-        next_id = top_p_sample(logits, top_p).item()
-        ids.append(next_id)
-        if eos_id is not None and next_id == eos_id and len(ids) - len(prompt_ids) >= min_tokens:
+        if all(done):
             break
-    return ids
+        x, mask = pad_batch([s[-context_len:] for s in seqs], device=device, padding_side="left")
+        logits = model(x, mask)[:, -1, :] / max(temperature, 1e-6)
+        next_ids = top_p_sample(logits, top_p).tolist()
+        for i, next_id in enumerate(next_ids):
+            if done[i]:
+                continue
+            seqs[i].append(next_id)
+            if eos_id is not None and next_id == eos_id and len(seqs[i]) - n_prompt[i] >= min_tokens:
+                done[i] = True
+    return seqs
+
+
+def generate(model, prompt_ids, context_len, max_new_tokens, temperature, top_p, min_tokens, eos_id, device):
+    return generate_batch(model, [prompt_ids], context_len, max_new_tokens, temperature, top_p, min_tokens, eos_id, device)[0]
 
 
 if __name__ == "__main__":
@@ -106,13 +117,13 @@ if __name__ == "__main__":
         stories = [s.strip() for s in text.split("<|endoftext|>") if s.strip()]
         samples = random.sample(stories, min(args.num_samples, len(stories)))
 
-        for i, story in enumerate(samples):
-            story_ids = tokenizer.encode(story)
-            prompt_ids = story_ids[:args.prompt_tokens]
-            out_ids = generate(
-                model, prompt_ids, cfg.training.context_len, args.max_new_tokens,
-                temperature, top_p, min_tokens, eos_id, device,
-            )
+        story_ids_list = [tokenizer.encode(story) for story in samples]
+        prompts = [ids[:args.prompt_tokens] for ids in story_ids_list]
+        outs = generate_batch(
+            model, prompts, cfg.training.context_len, args.max_new_tokens,
+            temperature, top_p, min_tokens, eos_id, device,
+        )
+        for i, (story_ids, prompt_ids, out_ids) in enumerate(zip(story_ids_list, prompts, outs)):
             print(f"\n===== sample {i + 1} =====")
             print(f"--- prompt ---\n{tokenizer.decode(prompt_ids)}")
             print(f"--- generated continuation ---\n{tokenizer.decode(out_ids[len(prompt_ids):])}")

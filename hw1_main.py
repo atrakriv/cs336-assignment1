@@ -40,6 +40,8 @@ if __name__ == "__main__":
     device  = cfg.training.device
     context_len  = cfg.training.context_len
     batch_size = cfg.training.batch_size
+    varlen = cfg.training.variable_length
+    eos_id = cfg.training.eos_id
     num_iters = cfg.training.num_iters
     log_interval = cfg.training.log_interval
     d_model = cfg.training.d_model
@@ -118,9 +120,13 @@ if __name__ == "__main__":
     for step in range(start_step, num_iters + 1):
         lr = get_cosine_lr(step, max_lr, min_lr, warmup_iters, cosine_cycle_iters)
         for pg in optimizer.param_groups: pg['lr'] = lr
-        x, y = data_loader(train_dataset, batch_size, context_len, device)
-        logits = model(x)  # (B, T, V)
-        loss = cross_entropy(logits, y)
+        if varlen:
+            x, y, mask = data_loader_docs(train_dataset, batch_size, context_len, device, eos_id)
+        else:
+            x, y = data_loader(train_dataset, batch_size, context_len, device)
+            mask = None
+        logits = model(x, mask)  # (B, T, V)
+        loss = cross_entropy(logits, y, mask)
         optimizer.zero_grad()
         loss.backward()
         clip_gradient(model.parameters(), max_norm = 1.0)
@@ -135,9 +141,13 @@ if __name__ == "__main__":
             with torch.no_grad():
                 val_losses = []
                 for _ in range(num_val_batches):
-                    x_val, y_val = data_loader(val_dataset, batch_size, context_len, device)
-                    val_logits = model(x_val)
-                    val_losses.append(cross_entropy(val_logits, y_val).item())
+                    if varlen:
+                        x_val, y_val, mask_val = data_loader_docs(val_dataset, batch_size, context_len, device, eos_id)
+                    else:
+                        x_val, y_val = data_loader(val_dataset, batch_size, context_len, device)
+                        mask_val = None
+                    val_logits = model(x_val, mask_val)
+                    val_losses.append(cross_entropy(val_logits, y_val, mask_val).item())
             val_loss = sum(val_losses) / len(val_losses)
             elapsed = timer.elapsed()
             print(f"step {step:>6} | val_loss {val_loss:.4f} | time {elapsed:.1f}s")

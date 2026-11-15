@@ -27,6 +27,8 @@ class TrainingConfig:
 
     # training loop
     batch_size: int = 64
+    variable_length: bool = False  # sample whole documents (split on eos_id, padded + masked) instead of full context_len windows
+    eos_id: int = 256              # <|endoftext|> id: right after the 256 byte tokens in BPETrainer
     num_iters: int = 5000
     log_interval: int = 10
 
